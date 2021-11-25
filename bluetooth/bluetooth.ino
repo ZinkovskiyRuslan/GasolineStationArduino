@@ -72,10 +72,11 @@ void loop() {
       {
         for (int i=0; i<999; i++)
         {
-          if(ClientFuelInfo[i].id == deviceUniqueID)
+          if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
           {
             ESP_BT.println(ClientFuelInfo[i].id +"|0|"+ ClientFuelInfo[i].fuel);
             Serial.println(">>> " + ClientFuelInfo[i].id +"|0|"+ ClientFuelInfo[i].fuel);
+            break;
           }
         }
       }
@@ -83,20 +84,24 @@ void loop() {
       {
         for (int i=0; i< (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
         {
-          if(ClientFuelInfo[i].id == deviceUniqueID)
+          if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
           {
             ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
-            if(ClientFuelInfo[i].fuel > 0)
+            
+            for(int j = 0; j <= ClientFuelInfo[i].fuel;j=j+10)
             {
-                for(int j = 0; j <= ClientFuelInfo[i].fuel;j=j+10)
-                {
-                  delay(200);
-                  Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
-                  ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
-                }
-                ClientFuelInfo[i].fuel=0;
-            }
+              delay(200);
+              Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
+              ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
+            }                
+            
+            Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
+            ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
+            
+            setFuelInfo(ClientFuelInfo[i].id, ClientFuelInfo[i].fuel);
+            ClientFuelInfo[i].fuel=0;
+            break;
           }
         }
       }
@@ -104,6 +109,41 @@ void loop() {
   }  
   delay(100);
   //Serial.println(ESP.getFreeHeap());
+}
+void getFuelInfo()
+{
+  String response = GetRestResponse("getFuelInfo.php");  
+  //set empty
+  for (int i=0; i< (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
+  {
+      ClientFuelInfo[i].id  = "";
+      ClientFuelInfo[i].fuel = 0;
+  }
+  
+  int i = 0;
+  String subStr = "";     
+  for (auto c : response)
+  {
+      if(c==';')
+      {
+          String id="";
+          String fuel="";
+
+          int index = subStr.indexOf('|');
+          ClientFuelInfo[i].id = subStr.substring(0, index);
+          ClientFuelInfo[i].fuel = subStr.substring(index + 1,subStr.length()).toInt();
+          printf("curr=%i id=%s fuel=%i\n", i, ClientFuelInfo[i].id.c_str(), ClientFuelInfo[i].fuel);
+          i++;
+          subStr = "";
+      }else{
+          subStr += c;
+      }        
+  }
+}
+
+void setFuelInfo(String id, int fuel)
+{
+  String response = GetRestResponse("setFuelInfo.php?id=" + id + "&fuel=" + fuel);
 }
 
 void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param){
@@ -113,7 +153,10 @@ void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param){
 
   if(event == ESP_SPP_CLOSE_EVT ){
     Serial.println("Client disconnected");
-    //ESP.restart();
+    
+    digitalWrite(LED_BUILTIN, LOW);
+    ESP.restart();
+    
     delay(1000);
     ESP_BT.end();
     delay(1000);
@@ -136,9 +179,9 @@ void printDeviceAddress() {
   Serial.println(""); 
 }
 
-void getFuelInfo()
+String GetRestResponse(String getMethod)
 {
-  String line="";
+  String response = "";
   WiFiMulti WiFiMulti;
   WiFiMulti.addAP(ssid, password);  
   Serial.print("Waiting for WiFi");
@@ -149,20 +192,20 @@ void getFuelInfo()
       if (retry > retryFindWiFi)
         {
           Serial.println("\nError Find WiFi");
-          return;
+          return "-1";
         }
       retry++;
   }
   Serial.println("\nWiFi connected. IP address: " + WiFi.localIP().toString());
-  Serial.println("Connecting to " + String(host));
+  Serial.println("Connecting to GET: " + String(host) + "/" + getMethod);
   WiFiClient client;
   if (!client.connect(host, port)) {
       Serial.println("Connection failed.");
       Serial.println("Waiting 5 seconds before retrying...");
       delay(5000);
-      return;
+      return "-1";
   }
-  client.println("GET /getFuelInfo.php HTTP/1.1");
+  client.println("GET /" + getMethod + " HTTP/1.1");
   client.println("Host: " + String(host) + " \n\n");
 
   int maxloops = 0;
@@ -175,42 +218,17 @@ void getFuelInfo()
   {
     while(client.available() > 0)
     {        
-      line = client.readStringUntil('\n');
+      response = client.readStringUntil('\n');
     }
-    Serial.println(line);
+    Serial.println(response);
   }
   else
   {
     Serial.println("client.available() timed out ");
+    return "-1";
   }
   Serial.println("Closing connection.");
   client.stop();  
   WiFi.mode(WIFI_OFF);
-
-  //set empty
-  for (int i=0; i< (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
-  {
-      ClientFuelInfo[i].id  = "";
-      ClientFuelInfo[i].fuel = 0;
-  }
-  
-  int i = 0;
-  String subStr = "";     
-  for (auto c : line)
-  {
-      if(c==';')
-      {
-          String id="";
-          String fuel="";
-
-          int index = subStr.indexOf('|');
-          ClientFuelInfo[i].id = subStr.substring(0, index);
-          ClientFuelInfo[i].fuel = subStr.substring(index + 1,subStr.length()).toInt();
-          printf("curr=%i id=%s fuel=%i\n", i, ClientFuelInfo[i].id.c_str(), ClientFuelInfo[i].fuel);
-          i++;
-          subStr = "";
-      }else{
-          subStr += c;
-      }        
-  }
+  return response;
 }
