@@ -6,6 +6,16 @@
 #include <WiFiMulti.h>
 //#include "Esp.h"
 
+const int portPin1 = 34;
+const int portPin2 = 35;
+const int portTrigger = 27;
+
+int pulse = 0;
+int level = 0;
+int portValue = 0;
+
+int waitingSignal = 15; //waiting for signal in seconds 
+
 const char* ssid     = "3.14";
 const char* password = "0123456789";
 int retryFindWiFi = 5;
@@ -35,6 +45,10 @@ struct Command Command;
 struct ClientFuelInfo ClientFuelInfo[1000];
 
 void setup() {
+  pinMode(portPin1, INPUT_PULLDOWN);
+  pinMode(portPin2, INPUT_PULLDOWN);
+  pinMode(portTrigger, OUTPUT);
+  digitalWrite(portTrigger, LOW);
   Serial.begin(115200); // Запускаем последовательный монитор 
   Serial.println("\n");
   getFuelInfo();
@@ -88,18 +102,49 @@ void loop() {
           {
             ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
-            
+            int fuelBegin = ClientFuelInfo[i].fuel;
+            digitalWrite(portTrigger, HIGH);
+            uint32_t tmr = micros();
+            while(ClientFuelInfo[i].fuel > 0)
+            {     
+                portValue = analogRead(portPin1);
+                if(level == 0 && portValue == 4095)
+                {
+                  level = 1;
+                  pulse++;
+                  tmr = micros();
+                }
+                if(level == 1 && portValue < 4095)
+                {
+                  level = 0;
+                  pulse++;
+                  tmr = micros();
+                }
+                if(pulse > 200)
+                {
+                    pulse = 0;
+                    ClientFuelInfo[i].fuel--;
+                    ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
+                }
+                if(micros() - tmr > waitingSignal*1000000)
+                {
+                  Serial.println("Выход. Нет ответа от счётчика");
+                  break;
+                }
+            }            
+            digitalWrite(portTrigger, LOW);
+            /*
             for(int j = 0; j <= ClientFuelInfo[i].fuel;j=j+10)
             {
               delay(200);
               Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
               ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
             }                
-            
+            */
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             
-            setFuelInfo(ClientFuelInfo[i].id, ClientFuelInfo[i].fuel);
+            setFuelInfo(ClientFuelInfo[i].id, fuelBegin - ClientFuelInfo[i].fuel);
             ClientFuelInfo[i].fuel=0;
             break;
           }
