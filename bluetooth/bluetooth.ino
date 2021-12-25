@@ -6,9 +6,12 @@
 #include <WiFiMulti.h>
 //#include "Esp.h"
 
+const int batteryVoltagePin  = 0;
 const int portPin1 = 34;
 const int portPin2 = 35;
 const int portTrigger = 27;
+const int pulsePerLiter = 200; //number of pulses per liter
+const int preStopTrigger = 25; //min value = 0; max value "pulsePerLiter"; 1 = 10ml
 
 int pulse = 0;
 int level = 0;
@@ -23,7 +26,7 @@ int retryFindWiFi = 5;
 const uint16_t port = 80;
 const char * host = "erpelement.ru"; // ip or dns
 
-BluetoothSerial ESP_BT; // Объект для Bluetooth 
+BluetoothSerial SerialBT; // Объект для Bluetooth 
 
 String incoming;
 int LED_BUILTIN = 12;
@@ -44,25 +47,33 @@ struct ClientFuelInfo
 struct Command Command;
 struct ClientFuelInfo ClientFuelInfo[1000];
 
-void setup() {
+void setup() {  
+  pinMode(batteryVoltagePin, INPUT_PULLDOWN);
   pinMode(portPin1, INPUT_PULLDOWN);
   pinMode(portPin2, INPUT_PULLDOWN);
   pinMode(portTrigger, OUTPUT);
   digitalWrite(portTrigger, LOW);
+  pinMode (LED_BUILTIN, OUTPUT);// задаем контакт подключения светодиода как выходной
+  digitalWrite (LED_BUILTIN, LOW);
+  
   Serial.begin(115200); // Запускаем последовательный монитор 
   Serial.println("\n");
   getFuelInfo();
-  ESP_BT.begin("АЗС"); // Задаем имя вашего устройства Bluetooth
-  ESP_BT.register_callback(callback);  
-  pinMode (LED_BUILTIN, OUTPUT);// задаем контакт подключения светодиода как выходной
+  SerialBT.begin("АЗС"); // Задаем имя вашего устройства Bluetooth
+  SerialBT.register_callback(callback);  
   printDeviceAddress();
 }
  
 void loop() {
-  if (ESP_BT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
+  //Serial.printf("voltage - %i\n", analogRead(batteryVoltagePin));
+  delay(100); // 100 millisecond timeout    
+  digitalWrite (LED_BUILTIN, LOW);
+  delay(100); // 100 millisecond timeout    
+  digitalWrite (LED_BUILTIN, HIGH);
+  if (SerialBT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
   {
-    Serial.setTimeout(100); // 100 millisecond timeout
-    incoming = ESP_BT.readString();
+    Serial.setTimeout(100); // 100 millisecond timeout    
+    incoming = SerialBT.readString();
     Serial.println("<<< " + incoming);
 
     int str_len = incoming.length() + 1; 
@@ -84,15 +95,14 @@ void loop() {
     {
       if(command == Command.GetfuelVolume)
       {
-        for (int i=0; i<999; i++)
+        int fuelVolume = GetFuelVolume(deviceUniqueID);
+        if(fuelVolume == 0)
         {
-          if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
-          {
-            ESP_BT.println(ClientFuelInfo[i].id +"|0|"+ ClientFuelInfo[i].fuel);
-            Serial.println(">>> " + ClientFuelInfo[i].id +"|0|"+ ClientFuelInfo[i].fuel);
-            break;
-          }
+          getFuelInfo();
+          fuelVolume = GetFuelVolume(deviceUniqueID);          
         }
+        SerialBT.println(deviceUniqueID + "|0|" + fuelVolume);
+        Serial.println(">>> " + deviceUniqueID +"|0|"+ fuelVolume);
       }
       if(command == Command.StartFuelFill)
       {
@@ -100,7 +110,7 @@ void loop() {
         {
           if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
           {
-            ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
+            SerialBT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             int fuelBegin = ClientFuelInfo[i].fuel;
             digitalWrite(portTrigger, HIGH);
@@ -120,11 +130,12 @@ void loop() {
                   pulse++;
                   tmr = micros();
                 }
-                if(pulse > 200)
+                if(pulse == pulsePerLiter || (ClientFuelInfo[i].fuel == 1 && pulse == (pulsePerLiter - preStopTrigger)))
                 {
                     pulse = 0;
                     ClientFuelInfo[i].fuel--;
-                    ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
+                    Serial.println(">>> " + ClientFuelInfo[i].id + "|" + Command.StartFuelFill+"|" + ClientFuelInfo[i].fuel);
+                    SerialBT.println(ClientFuelInfo[i].id + "|" + Command.StartFuelFill + "|" + ClientFuelInfo[i].fuel);
                 }
                 if(micros() - tmr > waitingSignal*1000000)
                 {
@@ -138,11 +149,11 @@ void loop() {
             {
               delay(200);
               Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
-              ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
+              SerialBT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
             }                
             */
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
-            ESP_BT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
+            SerialBT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             
             setFuelInfo(ClientFuelInfo[i].id, fuelBegin - ClientFuelInfo[i].fuel);
             ClientFuelInfo[i].fuel=0;
@@ -155,11 +166,25 @@ void loop() {
   delay(100);
   //Serial.println(ESP.getFreeHeap());
 }
+
+/*Возвращает доступный объём топлива из массива*/
+int GetFuelVolume(String deviceUniqueID)
+{
+  for (int i = 0; i < (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
+  {
+    if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
+    {
+      return ClientFuelInfo[i].fuel;
+    }
+  }
+  return 0;
+}
+
 void getFuelInfo()
 {
   String response = GetRestResponse("getFuelInfo.php");  
   //set empty
-  for (int i=0; i< (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
+  for (int i = 0; i < (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
   {
       ClientFuelInfo[i].id  = "";
       ClientFuelInfo[i].fuel = 0;
@@ -198,15 +223,18 @@ void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param){
 
   if(event == ESP_SPP_CLOSE_EVT ){
     Serial.println("Client disconnected");
-    
+        
     digitalWrite(LED_BUILTIN, LOW);
+    SerialBT.flush();
+    SerialBT.disconnect();
     ESP.restart();
-    
+    /*
     delay(1000);
-    ESP_BT.end();
+    SerialBT.end();
     delay(1000);
-    ESP_BT.begin("АЗС");
+    SerialBT.begin("АЗС");
     delay(1000);
+    */
   }
 }
    
