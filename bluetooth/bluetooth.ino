@@ -1,12 +1,8 @@
 #include "BluetoothSerial.h"
-#include "esp_bt_main.h"
 #include "esp_bt_device.h"
-//#include <Arduino.h>
-//#include <WiFi.h> 
 #include <WiFiMulti.h>
-//#include "Esp.h"
 
-const int batteryVoltagePin  = 0;
+const int batteryVoltagePin  = 36;
 const int portPin1 = 34;
 const int portPin2 = 35;
 const int portTrigger = 27;
@@ -19,14 +15,14 @@ int portValue = 0;
 
 int waitingSignal = 15; //waiting for signal in seconds 
 
-const char* ssid     = "3.14";
+const char* ssid     = "wifi";
 const char* password = "0123456789";
 int retryFindWiFi = 5;
 
 const uint16_t port = 80;
 const char * host = "erpelement.ru"; // ip or dns
 
-BluetoothSerial SerialBT; // Объект для Bluetooth 
+BluetoothSerial SerialBT;
 
 String incoming;
 int LED_BUILTIN = 12;
@@ -36,7 +32,6 @@ struct Command
     String GetfuelVolume = "0";
     String StartFuelFill = "1";
 };
-
 
 struct ClientFuelInfo
 {
@@ -48,27 +43,26 @@ struct Command Command;
 struct ClientFuelInfo ClientFuelInfo[1000];
 
 void setup() {  
-  pinMode(batteryVoltagePin, INPUT_PULLDOWN);
-  pinMode(portPin1, INPUT_PULLDOWN);
-  pinMode(portPin2, INPUT_PULLDOWN);
+  pinMode(batteryVoltagePin, INPUT);
+  pinMode(portPin1, INPUT);
+  pinMode(portPin2, INPUT);
   pinMode(portTrigger, OUTPUT);
   digitalWrite(portTrigger, LOW);
   pinMode (LED_BUILTIN, OUTPUT);// задаем контакт подключения светодиода как выходной
   digitalWrite (LED_BUILTIN, LOW);
   
-  Serial.begin(115200); // Запускаем последовательный монитор 
+  Serial.begin(2000000); // Запускаем последовательный монитор 
   Serial.println("\n");
-  getFuelInfo();
+  getFuelInfo("Start");
   SerialBT.begin("АЗС"); // Задаем имя вашего устройства Bluetooth
   SerialBT.register_callback(callback);  
   printDeviceAddress();
 }
  
-void loop() {
-  //Serial.printf("voltage - %i\n", analogRead(batteryVoltagePin));
-  delay(100); // 100 millisecond timeout    
+void loop() {  
+  delay(50); // 100 millisecond timeout    
   digitalWrite (LED_BUILTIN, LOW);
-  delay(100); // 100 millisecond timeout    
+  delay(50); // 100 millisecond timeout    
   digitalWrite (LED_BUILTIN, HIGH);
   if (SerialBT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
   {
@@ -96,13 +90,13 @@ void loop() {
       if(command == Command.GetfuelVolume)
       {
         int fuelVolume = GetFuelVolume(deviceUniqueID);
-        if(fuelVolume == 0)
-        {
-          getFuelInfo();
-          fuelVolume = GetFuelVolume(deviceUniqueID);          
-        }
         SerialBT.println(deviceUniqueID + "|0|" + fuelVolume);
         Serial.println(">>> " + deviceUniqueID +"|0|"+ fuelVolume);
+        SerialBT.disconnect();
+        if(fuelVolume == 0)
+        {
+          getFuelInfo(deviceUniqueID);
+        }
       }
       if(command == Command.StartFuelFill)
       {
@@ -144,14 +138,6 @@ void loop() {
                 }
             }            
             digitalWrite(portTrigger, LOW);
-            /*
-            for(int j = 0; j <= ClientFuelInfo[i].fuel;j=j+10)
-            {
-              delay(200);
-              Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
-              SerialBT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ j);
-            }                
-            */
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             SerialBT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             
@@ -163,8 +149,6 @@ void loop() {
       }
     }    
   }  
-  delay(100);
-  //Serial.println(ESP.getFreeHeap());
 }
 
 /*Возвращает доступный объём топлива из массива*/
@@ -180,34 +164,37 @@ int GetFuelVolume(String deviceUniqueID)
   return 0;
 }
 
-void getFuelInfo()
+void getFuelInfo(String id)
 {
-  String response = GetRestResponse("getFuelInfo.php");  
-  //set empty
-  for (int i = 0; i < (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
+  String response = GetRestResponse("getFuelInfo.php?id=" + id + "&batteryVoltage=" + analogRead(batteryVoltagePin));
+  if(response.length() > 0)
   {
-      ClientFuelInfo[i].id  = "";
-      ClientFuelInfo[i].fuel = 0;
-  }
+    //set empty ClientFuelInfo array ToDo refactor
+    for (int i = 0; i < (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
+    {
+        ClientFuelInfo[i].id  = "";
+        ClientFuelInfo[i].fuel = 0;
+    }
+    
+    int i = 0;
+    String subStr = "";     
+    for (auto c : response)
+    {
+        if(c==';')
+        {
+            String id="";
+            String fuel="";
   
-  int i = 0;
-  String subStr = "";     
-  for (auto c : response)
-  {
-      if(c==';')
-      {
-          String id="";
-          String fuel="";
-
-          int index = subStr.indexOf('|');
-          ClientFuelInfo[i].id = subStr.substring(0, index);
-          ClientFuelInfo[i].fuel = subStr.substring(index + 1,subStr.length()).toInt();
-          printf("curr=%i id=%s fuel=%i\n", i, ClientFuelInfo[i].id.c_str(), ClientFuelInfo[i].fuel);
-          i++;
-          subStr = "";
-      }else{
-          subStr += c;
-      }        
+            int index = subStr.indexOf('|');
+            ClientFuelInfo[i].id = subStr.substring(0, index);
+            ClientFuelInfo[i].fuel = subStr.substring(index + 1,subStr.length()).toInt();
+            printf("curr=%i id=%s fuel=%i\n", i, ClientFuelInfo[i].id.c_str(), ClientFuelInfo[i].fuel);
+            i++;
+            subStr = "";
+        }else{
+            subStr += c;
+        }        
+    }
   }
 }
 
@@ -225,9 +212,11 @@ void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param){
     Serial.println("Client disconnected");
         
     digitalWrite(LED_BUILTIN, LOW);
+    /*
     SerialBT.flush();
     SerialBT.disconnect();
     ESP.restart();
+    */
     /*
     delay(1000);
     SerialBT.end();
@@ -257,15 +246,16 @@ String GetRestResponse(String getMethod)
   String response = "";
   WiFiMulti WiFiMulti;
   WiFiMulti.addAP(ssid, password);  
+  
   Serial.print("Waiting for WiFi");
   int retry = 0;
   while(WiFiMulti.run() != WL_CONNECTED) {
       Serial.print(".");
-      //delay(100);
       if (retry > retryFindWiFi)
         {
           Serial.println("\nError Find WiFi");
-          return "-1";
+          WiFi.mode(WIFI_OFF);
+          return "";
         }
       retry++;
   }
@@ -274,19 +264,19 @@ String GetRestResponse(String getMethod)
   WiFiClient client;
   if (!client.connect(host, port)) {
       Serial.println("Connection failed.");
-      Serial.println("Waiting 5 seconds before retrying...");
-      delay(5000);
-      return "-1";
+      client.stop();  
+      WiFi.mode(WIFI_OFF);
+      return "";
   }
   client.println("GET /" + getMethod + " HTTP/1.1");
   client.println("Host: " + String(host) + " \n\n");
 
-  int maxloops = 0;
-  while (!client.available() && maxloops < 1000)
+  int currLoop = 0;
+  while (!client.available() && currLoop++ < 3000)
   {
-    maxloops++;
-    delay(10); //delay 1 msec
+    delay(10);
   }
+  
   if (client.available() > 0)
   {
     while(client.available() > 0)
@@ -298,7 +288,9 @@ String GetRestResponse(String getMethod)
   else
   {
     Serial.println("client.available() timed out ");
-    return "-1";
+    client.stop();  
+    WiFi.mode(WIFI_OFF);
+    return "";
   }
   Serial.println("Closing connection.");
   client.stop();  
