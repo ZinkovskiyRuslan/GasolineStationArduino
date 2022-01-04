@@ -30,7 +30,8 @@ int LED_BUILTIN = 12;
 struct Command
 {
     String GetfuelVolume = "0";
-    String StartFuelFill = "1";
+    String GetfuelVolumeRetry = "1";
+    String StartFuelFill = "2";
 };
 
 struct ClientFuelInfo
@@ -92,12 +93,16 @@ void loop() {
         int fuelVolume = GetFuelVolume(deviceUniqueID);
         SerialBT.println(deviceUniqueID + "|0|" + fuelVolume);
         Serial.println(">>> " + deviceUniqueID +"|0|"+ fuelVolume);
-        SerialBT.disconnect();
         if(fuelVolume == 0)
         {
           getFuelInfo(deviceUniqueID);
         }
       }
+      if(command == Command.GetfuelVolumeRetry)
+      {
+        int fuelVolume = GetFuelVolume(deviceUniqueID);
+        SendCommand(deviceUniqueID, command, String(fuelVolume + 111));
+      }      
       if(command == Command.StartFuelFill)
       {
         for (int i=0; i< (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
@@ -151,6 +156,12 @@ void loop() {
   }  
 }
 
+void SendCommand(String deviceUniqueID, String command, String value)
+{
+  SerialBT.println(deviceUniqueID + "|" + command + "|" + value);
+  Serial.println(">>> " + deviceUniqueID + "|" + command + "|" + value);
+}
+       
 /*Возвращает доступный объём топлива из массива*/
 int GetFuelVolume(String deviceUniqueID)
 {
