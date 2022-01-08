@@ -2,6 +2,7 @@
 #include "esp_bt_device.h"
 #include <WiFiMulti.h>
 
+const String systemId = "0";
 const int batteryVoltagePin  = 36;
 const int portPin1 = 34;
 const int portPin2 = 35;
@@ -16,6 +17,7 @@ int portValue = 0;
 int waitingSignal = 15; //waiting for signal in seconds 
 
 const char* ssid     = "wifi";
+//const char* ssid     = "3.14";
 const char* password = "0123456789";
 int retryFindWiFi = 5;
 
@@ -23,6 +25,8 @@ const uint16_t port = 80;
 const char * host = "erpelement.ru"; // ip or dns
 
 BluetoothSerial SerialBT;
+WiFiClient client;
+WiFiMulti WiFiMulti;
 
 String incoming;
 int LED_BUILTIN = 12;
@@ -53,8 +57,9 @@ void setup() {
   digitalWrite (LED_BUILTIN, LOW);
   
   Serial.begin(2000000); // Запускаем последовательный монитор 
-  Serial.println("\n");
-  getFuelInfo("Start");
+  Serial.println("\n");  
+  WiFiMulti.addAP(ssid, password); 
+  getFuelInfo("Start"); 
   SerialBT.begin("АЗС"); // Задаем имя вашего устройства Bluetooth
   SerialBT.register_callback(callback);  
   printDeviceAddress();
@@ -67,7 +72,7 @@ void loop() {
   digitalWrite (LED_BUILTIN, HIGH);
   if (SerialBT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
   {
-    Serial.setTimeout(100); // 100 millisecond timeout    
+    Serial.setTimeout(100); // 100 millisecond timeout 
     incoming = SerialBT.readString();
     Serial.println("<<< " + incoming);
 
@@ -101,11 +106,11 @@ void loop() {
       if(command == Command.GetfuelVolumeRetry)
       {
         int fuelVolume = GetFuelVolume(deviceUniqueID);
-        SendCommand(deviceUniqueID, command, String(fuelVolume + 111));
+        SendCommand(deviceUniqueID, command, String(fuelVolume));
       }      
       if(command == Command.StartFuelFill)
       {
-        for (int i=0; i< (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
+        for (int i=0; i < (sizeof ClientFuelInfo/sizeof ClientFuelInfo[0]); i++)
         {
           if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
           {
@@ -177,7 +182,7 @@ int GetFuelVolume(String deviceUniqueID)
 
 void getFuelInfo(String id)
 {
-  String response = GetRestResponse("getFuelInfo.php?id=" + id + "&batteryVoltage=" + analogRead(batteryVoltagePin));
+  String response = GetRestResponse("api/system/getFuelInfo.php?systemId=" + systemId + "&id=" + id + "&batteryVoltage=" + analogRead(batteryVoltagePin));
   if(response.length() > 0)
   {
     //set empty ClientFuelInfo array ToDo refactor
@@ -211,7 +216,7 @@ void getFuelInfo(String id)
 
 void setFuelInfo(String id, int fuel)
 {
-  String response = GetRestResponse("setFuelInfo.php?id=" + id + "&fuel=" + fuel);
+  String response = GetRestResponse("api/system/setFuelInfo.php?systemId=" + systemId + "&id=" + id + "&fuel=" + fuel);
 }
 
 void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param){
@@ -254,10 +259,7 @@ void printDeviceAddress() {
 
 String GetRestResponse(String getMethod)
 {
-  String response = "";
-  WiFiMulti WiFiMulti;
-  WiFiMulti.addAP(ssid, password);  
-  
+  String response = "";  
   Serial.print("Waiting for WiFi");
   int retry = 0;
   while(WiFiMulti.run() != WL_CONNECTED) {
@@ -269,10 +271,38 @@ String GetRestResponse(String getMethod)
           return "";
         }
       retry++;
+      delay(1000);
   }
+
+  
+  // begin region modem connect to 3g
+  if (!client.connect("192.168.1.1", 80))
+  {
+    Serial.println("Connection modem failed.");
+  }else{
+    client.println("GET /goform/setWanConnect?profile_id=25099_1&profile_type=0 HTTP/1.1");
+    client.println("Host: " + String("192.168.1.1") + " \n\n");
+  
+    int currLoop = 0;
+    while (!client.available() && currLoop++ < 3000)
+    {
+      delay(10);
+    }
+    
+    if (client.available() > 0)
+    {
+      while(client.available() > 0)
+      {        
+        response = client.readStringUntil('\n');
+      }
+      Serial.println("modem response: " + response);
+    }
+  }
+  // end region modem connect to 3g
+  
   Serial.println("\nWiFi connected. IP address: " + WiFi.localIP().toString());
   Serial.println("Connecting to GET: " + String(host) + "/" + getMethod);
-  WiFiClient client;
+
   if (!client.connect(host, port)) {
       Serial.println("Connection failed.");
       client.stop();  
@@ -299,12 +329,12 @@ String GetRestResponse(String getMethod)
   else
   {
     Serial.println("client.available() timed out ");
-    client.stop();  
+    client.stop();
     WiFi.mode(WIFI_OFF);
     return "";
   }
   Serial.println("Closing connection.");
-  client.stop();  
+  client.stop();
   WiFi.mode(WIFI_OFF);
   return response;
 }
