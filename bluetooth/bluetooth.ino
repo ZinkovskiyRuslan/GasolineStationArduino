@@ -7,6 +7,8 @@ const int batteryVoltagePin  = 36;
 const int portPin1 = 34;
 const int portPin2 = 35;
 const int portTrigger = 27;
+const int portStartModem = 5;
+
 const int pulsePerLiter = 200; //number of pulses per liter
 const int preStopTrigger = 25; //min value = 0; max value "pulsePerLiter"; 1 = 10ml
 
@@ -14,11 +16,12 @@ int pulse = 0;
 int level = 0;
 int portValue = 0;
 
-int waitingSignal = 15; //waiting for signal in seconds 
+int waitingSignal = 30; //waiting for signal from trigger in seconds 
 
 const char* ssid     = "wifi";
+const char* password = "pRLMa1qy";
 //const char* ssid     = "3.14";
-const char* password = "0123456789";
+//const char* password = "0123456789";
 int retryFindWiFi = 5;
 
 const uint16_t port = 80;
@@ -52,7 +55,11 @@ void setup() {
   pinMode(portPin1, INPUT);
   pinMode(portPin2, INPUT);
   pinMode(portTrigger, OUTPUT);
+  pinMode(portStartModem, OUTPUT);
+  
   digitalWrite(portTrigger, LOW);
+  digitalWrite(portStartModem, LOW);
+  
   pinMode (LED_BUILTIN, OUTPUT);// задаем контакт подключения светодиода как выходной
   digitalWrite (LED_BUILTIN, LOW);
   
@@ -66,9 +73,9 @@ void setup() {
 }
  
 void loop() {  
-  delay(50); // 100 millisecond timeout    
+  delay(50); // 50 millisecond timeout    
   digitalWrite (LED_BUILTIN, LOW);
-  delay(50); // 100 millisecond timeout    
+  delay(50); // 50 millisecond timeout    
   digitalWrite (LED_BUILTIN, HIGH);
   if (SerialBT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
   {
@@ -118,6 +125,7 @@ void loop() {
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             int fuelBegin = ClientFuelInfo[i].fuel;
             digitalWrite(portTrigger, HIGH);
+            
             uint32_t tmr = micros();
             while(ClientFuelInfo[i].fuel > 0)
             {     
@@ -256,25 +264,44 @@ void printDeviceAddress() {
   }  
   Serial.println(""); 
 }
-
-String GetRestResponse(String getMethod)
+void WiFiRun()
 {
-  String response = "";  
-  Serial.print("Waiting for WiFi");
+    if (WiFiConnect())
+      return;
+    StartModem();
+    WiFiRun();
+}
+
+void StartModem()
+{
+  Serial.println("Start Modem KeyDown");
+  digitalWrite(portStartModem, HIGH);
+  delay(3000);
+  Serial.println("Start Modem KeyUp");
+  digitalWrite(portStartModem, LOW);
+}
+
+bool WiFiConnect()
+{
   int retry = 0;
+  Serial.print("Waiting for WiFi");
   while(WiFiMulti.run() != WL_CONNECTED) {
       Serial.print(".");
       if (retry > retryFindWiFi)
         {
           Serial.println("\nError Find WiFi");
           WiFi.mode(WIFI_OFF);
-          return "";
+          return false;
         }
       retry++;
       delay(1000);
   }
-
-  
+  return true;
+}
+String GetRestResponse(String getMethod)
+{
+  String response = "";  
+  WiFiRun();
   // begin region modem connect to 3g
   if (!client.connect("192.168.1.1", 80))
   {
