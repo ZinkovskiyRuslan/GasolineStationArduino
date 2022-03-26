@@ -2,7 +2,6 @@
 #include "esp_bt_device.h"
 #include <WiFiMulti.h>
 
-const int batteryVoltagePin  = 36;
 const int portPin1 = 34;
 const int portPin2 = 35;
 const int portStartModem = 5;
@@ -60,7 +59,6 @@ struct Command Command;
 struct ClientFuelInfo ClientFuelInfo[1000];
 
 void setup() {  
-  pinMode(batteryVoltagePin, INPUT);
   pinMode(portPin1, INPUT);
   pinMode(portPin2, INPUT);
   pinMode(portCheckPumpStatus, INPUT);
@@ -80,7 +78,7 @@ void setup() {
   pinMode (LED_BUILTIN, OUTPUT);// задаем контакт подключения светодиода как выходной
   digitalWrite (LED_BUILTIN, LOW);
   
-  Serial.begin(2000000); // Запускаем последовательный монитор 
+  Serial.begin(115200); // Запускаем последовательный монитор 
   Serial.println("\n");  
   WiFiMulti.addAP(ssid, password); 
   getFuelInfo("Start"); 
@@ -221,7 +219,7 @@ int GetFuelVolume(String deviceUniqueID)
 
 void getFuelInfo(String id)
 {
-  String response = GetRestResponse("api/system/getFuelInfo.php?systemId=" + systemId + "&id=" + id + "&batteryVoltage=" + analogRead(batteryVoltagePin));
+  String response = GetRestResponse("api/system/getFuelInfo.php?systemId=" + systemId + "&id=" + id);
   if(response.length() > 0)
   {
     //set empty ClientFuelInfo array ToDo refactor
