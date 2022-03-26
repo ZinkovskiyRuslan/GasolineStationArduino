@@ -2,13 +2,22 @@
 #include "esp_bt_device.h"
 #include <WiFiMulti.h>
 
-const String systemId = "0";
 const int batteryVoltagePin  = 36;
 const int portPin1 = 34;
 const int portPin2 = 35;
-const int portTrigger = 27;
 const int portStartModem = 5;
 
+const int porTankerValue = 27;
+const int portExternalLed = 4;
+const int portCheckPumpStatus = 2;
+const int portTrigger = 15;
+const int portCheckBatteryStatus = 14;
+const int portBattery = 13;
+
+
+
+const String systemId = "0";
+const int portValueMax = 4095;
 const int pulsePerLiter = 200; //number of pulses per liter
 const int preStopTrigger = 25; //min value = 0; max value "pulsePerLiter"; 1 = 10ml
 
@@ -54,11 +63,19 @@ void setup() {
   pinMode(batteryVoltagePin, INPUT);
   pinMode(portPin1, INPUT);
   pinMode(portPin2, INPUT);
+  pinMode(portCheckPumpStatus, INPUT);
   pinMode(portTrigger, OUTPUT);
   pinMode(portStartModem, OUTPUT);
+  pinMode(portExternalLed, OUTPUT);
+  pinMode(portBattery, OUTPUT);
+  pinMode(portCheckBatteryStatus, INPUT);
+  pinMode(porTankerValue, INPUT);
+  
   
   digitalWrite(portTrigger, LOW);
   digitalWrite(portStartModem, LOW);
+  digitalWrite(portExternalLed, LOW);
+  digitalWrite(portBattery, HIGH);
   
   pinMode (LED_BUILTIN, OUTPUT);// задаем контакт подключения светодиода как выходной
   digitalWrite (LED_BUILTIN, LOW);
@@ -72,11 +89,24 @@ void setup() {
   printDeviceAddress();
 }
  
-void loop() {  
-  delay(50); // 50 millisecond timeout    
+void loop() {    
+  digitalWrite(portBattery, HIGH);
+  delay(500); // 50 millisecond timeout    
   digitalWrite (LED_BUILTIN, LOW);
-  delay(50); // 50 millisecond timeout    
-  digitalWrite (LED_BUILTIN, HIGH);
+  digitalWrite (portExternalLed, LOW);
+  
+  delay(500); // 50 millisecond timeout    
+  digitalWrite (LED_BUILTIN, HIGH);  
+  digitalWrite (portExternalLed, HIGH);
+  
+  if(analogRead(portCheckPumpStatus) == portValueMax)
+    StartFuelFillByButton();
+  
+  if(analogRead(portCheckBatteryStatus) == 0)
+    SendBatteryEvent();
+    
+  Serial.println("<<< " + String(analogRead(portCheckBatteryStatus))+"--" +String(analogRead(porTankerValue)));
+    
   if (SerialBT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
   {
     Serial.setTimeout(100); // 100 millisecond timeout 
@@ -121,6 +151,7 @@ void loop() {
         {
           if(ClientFuelInfo[i].id == deviceUniqueID && ClientFuelInfo[i].fuel > 0)
           {
+            pulse = 0;
             SerialBT.println(ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             Serial.println(">>> " + ClientFuelInfo[i].id +"|"+Command.StartFuelFill+"|"+ ClientFuelInfo[i].fuel);
             int fuelBegin = ClientFuelInfo[i].fuel;
@@ -130,13 +161,13 @@ void loop() {
             while(ClientFuelInfo[i].fuel > 0)
             {     
                 portValue = analogRead(portPin1);
-                if(level == 0 && portValue == 4095)
+                if(level == 0 && portValue == portValueMax)
                 {
                   level = 1;
                   pulse++;
                   tmr = micros();
                 }
-                if(level == 1 && portValue < 4095)
+                if(level == 1 && portValue < portValueMax)
                 {
                   level = 0;
                   pulse++;
@@ -298,6 +329,7 @@ bool WiFiConnect()
   }
   return true;
 }
+
 String GetRestResponse(String getMethod)
 {
   String response = "";  
@@ -364,4 +396,42 @@ String GetRestResponse(String getMethod)
   client.stop();
   WiFi.mode(WIFI_OFF);
   return response;
+}
+
+void StartFuelFillByButton()
+{
+  uint32_t tmr = micros();
+  pulse = 0;
+  
+  while(true)
+  {     
+      portValue = analogRead(portPin1);
+      if(level == 0 && portValue == portValueMax)
+      {
+        level = 1;
+        pulse++;
+        tmr = micros();
+      }
+      if(level == 1 && portValue < portValueMax)
+      {
+        level = 0;
+        pulse++;
+        tmr = micros();
+      }
+      if(micros() - tmr > waitingSignal*1000000)
+      {
+        Serial.println("Выход. Нет ответа от счётчика при ручой заправке");        
+        if(pulse > pulsePerLiter)
+          String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Ручая%20заправка%20на%20" + String(pulse/pulsePerLiter) + "л.");
+        else
+          Serial.println("Ложное срабатывание: pulse=" + String(pulse));        
+        break;
+      }
+  }            
+}
+
+void SendBatteryEvent()
+{
+   String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Переход%20АЗС%20на%20резервное%20питание.");
+     
 }
