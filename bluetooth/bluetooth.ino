@@ -16,6 +16,7 @@ const int portBattery = 13;
 
 
 const String systemId = "0";
+const int portValueMin = 0;
 const int portValueMax = 4095;
 const int pulsePerLiter = 200; //number of pulses per liter
 const int preStopTrigger = 25; //min value = 0; max value "pulsePerLiter"; 1 = 10ml
@@ -23,13 +24,14 @@ const int preStopTrigger = 25; //min value = 0; max value "pulsePerLiter"; 1 = 1
 int pulse = 0;
 int level = 0;
 int portValue = 0;
+bool isBtConnected;
 
 int waitingSignal = 30; //waiting for signal from trigger in seconds 
 
-const char* ssid     = "wifi";
-const char* password = "pRLMa1qy";
-//const char* ssid     = "3.14";
-//const char* password = "0123456789";
+//const char* ssid     = "wifi";
+//const char* password = "pRLMa1qy";
+const char* ssid     = "3.14";
+const char* password = "0123456789";
 int retryFindWiFi = 5;
 
 const uint16_t port = 80;
@@ -86,24 +88,20 @@ void setup() {
   SerialBT.register_callback(callback);  
   printDeviceAddress();
 }
- 
-void loop() {    
-  digitalWrite(portBattery, HIGH);
-  delay(500); // 50 millisecond timeout    
-  digitalWrite (LED_BUILTIN, LOW);
-  digitalWrite (portExternalLed, LOW);
-  
-  delay(500); // 50 millisecond timeout    
-  digitalWrite (LED_BUILTIN, HIGH);  
-  digitalWrite (portExternalLed, HIGH);
-  
+
+void loop() {
+  getFuelInfo("Start");
+  ExternalLedBlink();
+
   if(analogRead(portCheckPumpStatus) == portValueMax)
     StartFuelFillByButton();
   
-  if(analogRead(portCheckBatteryStatus) == 0)
-    SendBatteryEvent();
-    
-  Serial.println("<<< " + String(analogRead(portCheckBatteryStatus))+"--" +String(analogRead(porTankerValue)));
+  if(analogRead(portCheckBatteryStatus) == portValueMin)
+  {
+    String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Переход%20АЗС%20на%20резервное%20питание.");
+    digitalWrite(portBattery, LOW);
+    delay(5000);    
+  }
     
   if (SerialBT.available()) // Проверяем, не получили ли мы что-либо от Bluetooth модуля
   {
@@ -198,6 +196,26 @@ void loop() {
   }  
 }
 
+void ExternalLedBlink()
+{
+  int delayValue = 500; 
+  if(isBtConnected)  
+    delayValue = delayValue/5;
+  delay(delayValue);
+  digitalWrite (LED_BUILTIN, LOW);
+  digitalWrite (portExternalLed, LOW);
+  
+  delay(delayValue);
+  digitalWrite (LED_BUILTIN, HIGH);  
+  digitalWrite (portExternalLed, HIGH);
+  
+  Serial.println(
+    "\nporTankerValue-" +String(analogRead(porTankerValue))+
+    "\nportCheckPumpStatus-" +String(analogRead(portCheckPumpStatus))+
+    "\nportCheckBatteryStatus-" + String(analogRead(portCheckBatteryStatus))
+    );
+}
+
 void SendCommand(String deviceUniqueID, String command, String value)
 {
   SerialBT.println(deviceUniqueID + "|" + command + "|" + value);
@@ -258,13 +276,13 @@ void setFuelInfo(String id, int fuel)
 
 void callback(esp_spp_cb_event_t event, esp_spp_cb_param_t *param){
   if(event == ESP_SPP_SRV_OPEN_EVT){
+    isBtConnected = true;
     Serial.println("Client Connected");
   }
 
   if(event == ESP_SPP_CLOSE_EVT ){
     Serial.println("Client disconnected");
-        
-    digitalWrite(LED_BUILTIN, LOW);
+    isBtConnected = false;    
     /*
     SerialBT.flush();
     SerialBT.disconnect();
@@ -320,6 +338,15 @@ bool WiFiConnect()
         {
           Serial.println("\nError Find WiFi");
           WiFi.mode(WIFI_OFF);
+          //bzzz
+          for(int i =  0; i < 20; i++ )
+          { 
+            digitalWrite(portBattery, HIGH);
+            delay(5);
+            digitalWrite(portBattery, LOW);
+            delay(5); 
+          }
+          ESP.restart();  
           return false;
         }
       retry++;
@@ -332,6 +359,7 @@ String GetRestResponse(String getMethod)
 {
   String response = "";  
   WiFiRun();
+  /*
   // begin region modem connect to 3g
   if (!client.connect("192.168.1.1", 80))
   {
@@ -356,7 +384,7 @@ String GetRestResponse(String getMethod)
     }
   }
   // end region modem connect to 3g
-  
+  */
   Serial.println("\nWiFi connected. IP address: " + WiFi.localIP().toString());
   Serial.println("Connecting to GET: " + String(host) + "/" + getMethod);
 
@@ -398,7 +426,9 @@ String GetRestResponse(String getMethod)
 
 void StartFuelFillByButton()
 {
+  Serial.println("Инициирована заправка по кнопке");
   uint32_t tmr = micros();
+  uint32_t tmrBegin = micros();
   pulse = 0;
   
   while(true)
@@ -416,20 +446,10 @@ void StartFuelFillByButton()
         pulse++;
         tmr = micros();
       }
-      if(micros() - tmr > waitingSignal*1000000)
+      if(micros() - tmr > 1*1000000 && analogRead(portCheckPumpStatus) != portValueMax)
       {
-        Serial.println("Выход. Нет ответа от счётчика при ручой заправке");        
-        if(pulse > pulsePerLiter)
-          String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Ручая%20заправка%20на%20" + String(pulse/pulsePerLiter) + "л.");
-        else
-          Serial.println("Ложное срабатывание: pulse=" + String(pulse));        
+        String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Ручая%20заправка%20на%20" + String(pulse/pulsePerLiter) + "л.%20за%20" + String((micros()-tmrBegin/*-(micros() - tmr)*/)/1000000) + "сек");
         break;
       }
   }            
-}
-
-void SendBatteryEvent()
-{
-   String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Переход%20АЗС%20на%20резервное%20питание.");
-     
 }
