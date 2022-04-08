@@ -126,9 +126,7 @@ void Log(String message, int level)
 
 void loop() {
 
- getFuelInfo("Start");
-
-  
+  //getFuelInfo("Start");  
   
   if(isBtConnected)
     ExternalLedBlink(100, 1);
@@ -141,7 +139,7 @@ void loop() {
   
   if(digitalRead(portCheckBatteryStatus) == LOW)
   {
-    //String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Переход%20АЗС%20на%20резервное%20питание.");
+    String response = GetRestResponse("api/system/sendTelegram.php?token=klSimn53uRescojnfls&message=Переход%20АЗС%20на%20резервное%20питание.");
     digitalWrite(portBattery, LOW);
     delay(5000);    
   }
@@ -245,8 +243,8 @@ void ResendFromEerpom()
   Log("\nResendFromEerpom: " + String(eepromValue), 3);
   if(String(eepromValue).length() > 0)
   {
-    Serial.println("Resend from eerpom after reboot:" + String(eepromValue));
-    if(String(eepromValue) != "erpelement.ru/api/system/getFuelInfo.php?systemId=0&id=Start")
+    Serial.println("\nResend from eerpom after reboot:" + String(eepromValue));
+    if(String(eepromValue) != "/api/system/getFuelInfo.php?systemId=0&id=Start")
       String response = GetRestResponse(String(eepromValue));
     else
       Log("Skip ResendFromEerpom Start", 0);
@@ -258,6 +256,7 @@ void ResendFromEerpom()
 
 void RestartWithEeprom(String getMethod)
 {
+    Bzzz("RestartWithEeprom");
     Log("Save to EEPROM value: " + getMethod, 3);
     getMethod.toCharArray(eepromValue,sizeof eepromValue);
     EEPROM.put(0, eepromValue);
@@ -390,33 +389,41 @@ void StartModem()
   digitalWrite(portStartModem, LOW);
   delay(5000);
 }
+void Bzzz(String message)
+{
+  Log("\nBzzz = " + message, 1);
+  for(int i =  0; i < 20; i++ )
+  { 
+    digitalWrite(portBattery, LOW);
+    delay(3); 
+    digitalWrite(portBattery, HIGH);
+    delay(3);
+  }
+}
 
 bool WiFiConnect(int connectTryCnt)
 {
+  Log("\nWiFiConnect connectTryCnt = " + String(connectTryCnt), 1);
   int retryWait = 0;
-  for(int i = 0; i < connectTryCnt && !WiFiMulti.run(); i++)
+  for(int i = 0; i < connectTryCnt; i++)
   {
-    Log("\nWaiting for WiFi connectTryCnt = " + String(connectTryCnt), 1);
+    Log("\nWaiting for WiFi connect try = " + String(i), 1);
     while(WiFiMulti.run() != WL_CONNECTED) {
         Log(".", 1);
         if (retryWait > waitFindWiFi){
           Log("\nError Find WiFi", 2);
+          Bzzz("WiFiConnect");
           WiFiDisconnect();
-          //bzzz
-          for(int i =  0; i < 50; i++ )
-          { 
-            digitalWrite(portBattery, LOW);
-            delay(2); 
-            digitalWrite(portBattery, HIGH);
-            delay(2);
-          }
           break;
         }
         retryWait++;
         delay(1000);
     }
+    Log("\nWiFiMulti.run:" + String(WiFiMulti.run())  + " IP:" + WiFi.localIP().toString(), 0);
+    if(WiFiMulti.run() == WL_CONNECTED && WiFi.localIP().toString() != "0.0.0.0")
+      break;
   }
-  return WiFiMulti.run();
+  return (WiFiMulti.run() == WL_CONNECTED);
 }
 
 void WiFiDisconnect()
@@ -433,12 +440,74 @@ void WiFiDisconnect()
 String GetRestResponse(String getMethod)
 {
   String response = "";
-  if (!WiFiConnect(3))
+
+  for(int i = 0; i < 3 && WiFi.localIP().toString() == "0.0.0.0"; i++)
   {
+    if (!WiFiConnect(3))
+      RestartWithEeprom(getMethod);
+    if(WiFi.localIP().toString() == "0.0.0.0")
+        WiFiDisconnect();
+  }
+      
+  //setWanConnectModem();
+  
+  Serial.println("\nWiFi connected. IP address: " + WiFi.localIP().toString());
+  Serial.println("Connecting to GET: " + String(host) + "/" + getMethod);
+
+  bool isConnected = false;
+  for(int i = 0; i < 6 && isConnected == false; i++)
+  {
+    Log("\nclient.connect host=" + String(host) + " port=" + port + " IP:" + WiFi.localIP().toString(), 0);
+    if (!client.connect(host, port)) {
+        Serial.println("\nConnection failed.");
+        client.stop();  
+        //WiFiDisconnect();
+        //RestartWithEeprom(getMethod);
+    }else{
+      isConnected = true;
+    }
+  }
+  if(!isConnected)
+  {
+    WiFiDisconnect();
     RestartWithEeprom(getMethod);
   }
-  /*
-  // begin region modem connect to 3g
+  
+  client.println("GET /" + getMethod + " HTTP/1.1");
+  client.println("Host: " + String(host) + " \n\n");
+  
+  uint32_t tmrBegin = micros();
+  int currLoop = 0;
+  while (!client.available() && currLoop++ <= 3000)
+  {
+    delay(10);
+  }
+  Log("\nWait responce time: " +  String((micros() - tmrBegin)/1000000) + " sec ", 3);
+  if (client.available() > 0)
+  {
+    while(client.available() > 0)
+    {        
+      response = client.readStringUntil('\n');
+    }
+    Log("\n" + response, 1);
+  }
+  else
+  {
+    Serial.println("\nclient.available() timed out ");
+    client.stop();
+    WiFiDisconnect();
+    RestartWithEeprom(getMethod);
+  }
+  Serial.println("\nClosing connection.");
+  client.stop();
+  WiFiDisconnect();
+  return response;
+}
+
+// При простое модем уходит в спящий режим. 
+// Переводим в активный режим
+void setWanConnectModem()
+{
   if (!client.connect("192.168.1.1", 80))
   {
     Serial.println("Connection modem failed.");
@@ -454,53 +523,14 @@ String GetRestResponse(String getMethod)
     
     if (client.available() > 0)
     {
+      String response = "";
       while(client.available() > 0)
       {        
         response = client.readStringUntil('\n');
       }
-      Serial.println("modem response: " + response);
+      Log("setWanConnectModem response: " + response, 0);
     }
   }
-  // end region modem connect to 3g
-  */
-  Serial.println("\nWiFi connected. IP address: " + WiFi.localIP().toString());
-  Serial.println("Connecting to GET: " + String(host) + "/" + getMethod);
-
-  if (!client.connect(host, port)) {
-      Serial.println("Connection failed.");
-      client.stop();  
-      WiFiDisconnect();
-      RestartWithEeprom(getMethod);
-  }
-  client.println("GET /" + getMethod + " HTTP/1.1");
-  client.println("Host: " + String(host) + " \n\n");
-  
-  uint32_t tmrBegin = micros();
-  int currLoop = 0;
-  while (!client.available() && currLoop++ < 3000)
-  {
-    delay(10);
-  }
-  Log("Wait responce time: " +  String((micros() - tmrBegin)/1000000) + " sec", 3);
-  if (client.available() > 0)
-  {
-    while(client.available() > 0)
-    {        
-      response = client.readStringUntil('\n');
-    }
-    Log(response, 1);
-  }
-  else
-  {
-    Serial.println("client.available() timed out ");
-    client.stop();
-    WiFiDisconnect();
-    RestartWithEeprom(getMethod);
-  }
-  Serial.println("Closing connection.");
-  client.stop();
-  WiFiDisconnect();
-  return response;
 }
 
 void StartFuelFillByButton()
