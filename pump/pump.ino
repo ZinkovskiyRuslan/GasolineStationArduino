@@ -1,111 +1,120 @@
-#include <avr/wdt.h>
-#include <avr/sleep.h>
+// просыпаемся по аппаратному прерыванию из sleepDelay
+#include <GyverPower.h>
 
-
-volatile int sleepCnt = 0; //счётчик циклов в режиме сна
-
-const int sleepPowerDut = 10; //Цикл после которого будет подан сигнал на включение питания ДУТа
-const int sleepPowerOffDut = 20; //Цикл после которого будет подан сигнал на выключение питания ДУТа
-
-const int sleepPowerModem = 10; //Цикл после которого будет подан сигнал на включение питания модема
-const int sleepPowerOffModem = 19; //Цикл после которого будет подан сигнал на выключение питания модема
-
-const int portAccess = 3;
-const int portStart = 5;
-const int portStop = 7;
-const int portPump = 9;
-const int powerModem= 10;
-const int startModem = 11;
-const int powerDut = 12;
-const int voltageControl = 13;
-
-int i = 0;
-
+const int pinAccess = 2;
+const int pinStart = 5;
+const int pinStop = 7;
+const int pinPump = 9;
+const int pinPowerModem = 10;
+const int pinStartModem = 11;
+const int pinPowerDut = 12;
+const int pinVoltageControl = 3;
 
 void setup() {
   Serial.begin(115200);
-  pinMode(portAccess, INPUT_PULLUP);
-  pinMode(portStart, INPUT_PULLUP);
-  pinMode(portStop, INPUT_PULLUP);
-  pinMode(portPump, OUTPUT);
-  pinMode(powerDut, OUTPUT);
-  pinMode(startModem, OUTPUT);
-  pinMode(powerModem, OUTPUT);
-  pinMode(voltageControl, INPUT_PULLUP);
+  pinMode(pinAccess, INPUT_PULLUP);
+  pinMode(pinStart, INPUT_PULLUP);
+  pinMode(pinStop, INPUT_PULLUP);
+  pinMode(pinPump, OUTPUT);
+  pinMode(pinPowerDut, OUTPUT);
+  pinMode(pinStartModem, OUTPUT);
+  pinMode(pinPowerModem, OUTPUT);
+  pinMode(pinVoltageControl, INPUT_PULLUP);
 
-  digitalWrite(portPump, LOW);
-  digitalWrite(powerDut, LOW);
-  digitalWrite(powerModem, LOW);
+  digitalWrite(pinPump, LOW);
+  digitalWrite(pinPowerDut, LOW);
+  digitalWrite(pinPowerModem, LOW);
+
+  // подключаем прерывание на пин D3 (Arduino NANO)
+  attachInterrupt(1, isr, FALLING);
+
+  // глубокий сон
+  power.setSleepMode(POWERDOWN_SLEEP);
+  if (!digitalRead(pinVoltageControl)) {
+    startModem();
+  }
 }
 
+// обработчик аппаратного прерывания
+void isr() {
+  // дёргаем за функцию "проснуться"
+  // без неё проснёмся чуть позже (через 0-8 секунд)
+  power.wakeUp();
+}
 void loop() {
-  delay(100);
-  Serial.println(String(sleepCnt));  delay(100);
-  Serial.println(String(sleepCnt));  delay(100);
-
   //Режим работы от АКБ
-  if (digitalRead(voltageControl)) {
-    digitalWrite(portPump, LOW);
-    sleepCnt++;
-    Serial.println("sleepCnt" + String(sleepCnt));
-    sleep();
-    //Dut
-    if (sleepCnt > sleepPowerDut)
-      digitalWrite(powerDut, HIGH);
-    if (sleepCnt > sleepPowerOffDut)
-    {
-      digitalWrite(powerDut, LOW);
-      sleepCnt = 0;
-    }
-    //Modem
-    if (sleepCnt >= sleepPowerModem)
-    {
-      digitalWrite(powerModem, HIGH);
-      Serial.println("powerModem" + String(powerModem));
-      delay(3000);
-      if (sleepCnt == sleepPowerModem)
-      {
-        digitalWrite(startModem, HIGH);
-        Serial.println("startModem HIGH");
-        delay(3000);
-        digitalWrite(startModem, LOW);
-        Serial.println("startModem LOW");
+  if (digitalRead(pinVoltageControl)) {
+    digitalWrite(pinPump, LOW);
+    goSleep(6); //2 min
+    if (digitalRead(pinVoltageControl)) {
+      digitalWrite(pinPowerModem, LOW);
+      digitalWrite(pinPowerDut, LOW);
+      goSleep(49); //55 min
+      if (digitalRead(pinVoltageControl)) {
+        //start Dut, ESP32-2
+        digitalWrite(pinPowerDut, HIGH);
+        goSleep(4); //4 min
+      }
+      //Modem
+      startModem();
+      if (digitalRead(pinVoltageControl)) {
+        goSleep(2); //2 min
+        if (digitalRead(pinVoltageControl)) {
+          digitalWrite(pinPowerModem, LOW);
+          digitalWrite(pinPowerDut, LOW);
+        }
       }
     }
-    if (sleepCnt > sleepPowerOffModem)
-    {
-      digitalWrite(powerModem, LOW);
-    }
-
   }
   //Режим работы от сети
   else
   {
-    digitalWrite(powerDut, HIGH);
-    digitalWrite(powerModem, HIGH);
-    sleepCnt = 0;
-    if (!digitalRead(portAccess) && !digitalRead(portStart)) {
-      digitalWrite(portPump, HIGH);
+    digitalWrite(pinPowerDut, HIGH);
+    digitalWrite(pinPowerModem, HIGH);
+
+    if (!digitalRead(pinAccess) && !digitalRead(pinStart)) {
+      digitalWrite(pinPump, HIGH);
       Serial.println("start");
     }
 
-    if (digitalRead(portStop) || digitalRead(portAccess) || digitalRead(voltageControl)) {
-      digitalWrite(portPump, LOW);
+    if (digitalRead(pinStop) || digitalRead(pinAccess) || digitalRead(pinVoltageControl)) {
+      digitalWrite(pinPump, LOW);
       Serial.println("stop");
     }
     delay(100);
   }
 }
 
-void sleep()
+void goSleep(uint32_t period)
 {
-  wdt_enable(WDTO_2S); //Задаем интервал сторожевого таймера (2с)
-  WDTCSR |= (1 << WDIE); //Устанавливаем бит WDIE регистра WDTCSR для разрешения прерываний от сторожевого таймера
-  set_sleep_mode(SLEEP_MODE_PWR_DOWN); //Устанавливаем интересующий нас режим
-  sleep_mode(); // Переводим МК в спящий режим
+  Serial.println("go sleep " + String(period) + " min");
+  period = period * 1000 * 60;
+  delay(300);
+
+  // правильно будет вот тут включать прерывание
+  attachInterrupt(1, isr, FALLING);
+
+  // спим 12 секунд, но можем проснуться по кнопке
+  power.sleepDelay(period);
+  // тут проснулись по кнопке или через указанный период
+
+  // а вот тут сразу отключать
+  detachInterrupt(1);
+
+  Serial.println("wake up!");
+  //delay(300);
 }
 
-
-ISR (WDT_vect) {
-  wdt_disable();
+void startModem()
+{
+  digitalWrite(pinPowerModem, LOW);
+  delay(500);
+  digitalWrite(pinPowerModem, HIGH);
+  Serial.println("pinPowerModem" + String(pinPowerModem));
+  delay(100);
+  digitalWrite(pinStartModem, HIGH);
+  Serial.println("pinStartModem HIGH");
+  delay(3000);
+  digitalWrite(pinStartModem, LOW);
+  Serial.println("pinStartModem LOW");
 }
