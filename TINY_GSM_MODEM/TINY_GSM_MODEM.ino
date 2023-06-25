@@ -16,7 +16,7 @@
 // #define TINY_GSM_MODEM_SIM900
 // #define TINY_GSM_MODEM_SIM7000
 // #define TINY_GSM_MODEM_SIM7000SSL
-// #define TINY_GSM_MODEM_SIM7080
+ #define TINY_GSM_MODEM_SIM7080
 // #define TINY_GSM_MODEM_SIM5360
 // #define TINY_GSM_MODEM_SIM7600
 // #define TINY_GSM_MODEM_UBLOX
@@ -31,8 +31,8 @@
 // #define TINY_GSM_MODEM_ESP8266
 // #define TINY_GSM_MODEM_XBEE
 // #define TINY_GSM_MODEM_SEQUANS_MONARCH
+//#define TINY_GSM_MODEM_SIM800
 
-#define TINY_GSM_MODEM_SIM7070
 
 
 // Set serial for debug console (to the Serial Monitor, default speed 115200)
@@ -83,11 +83,11 @@ SoftwareSerial SerialAT(2, 3);  // RX, TX
 
 // Your GPRS credentials, if any
 
-/*
+
 const char apn[]      = "internet";
-const char gprsUser[] = "";//"gdata";
-const char gprsPass[] = "";//"gdata";
-*/
+const char gprsUser[] = "gdata";
+const char gprsPass[] = "gdata";
+
 
 /*
 const char apn[]      = "internet.tele2.ru";
@@ -95,11 +95,11 @@ const char gprsUser[] = "";
 const char gprsPass[] = "";
 */
 
-
+/*
 const char apn[]      = "internet.beeline.ru";
 const char gprsUser[] = "beeline";
 const char gprsPass[] = "beeline";
-
+*/
 
 
 // Your WiFi connection credentials, if applicable
@@ -110,6 +110,10 @@ const char wifiPass[] = "YourWiFiPass";
 const char server[]   = "vsh.pp.ua";
 const char resource[] = "/TinyGSM/logo.txt";
 
+/*
+const char server[]   = "github.com";
+const char resource[] = "/vshymanskyy/TinyGSM/blob/master/tools/Diagnostics/Diagnostics.ino";
+*/
 #include <TinyGsmClient.h>
 
 // Just in case someone defined the wrong thing..
@@ -183,7 +187,7 @@ void loop() {
     38, LTE only
     51  GSM and LTE only
     */
-    modem.setNetworkMode(2);
+//    modem.setNetworkMode(2);
     /*z*/
 
 
