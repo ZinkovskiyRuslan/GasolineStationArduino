@@ -1,5 +1,9 @@
 #include <GyverOLED.h>
-
+/*
+  https://kit.alexgyver.ru/tutorials/oled/
+    Arduino: SDA – A4, SCL – A5
+    Wemos  : SDA – D2, SCL – D1
+*/ 
 GyverOLED<SSD1306_128x64, OLED_NO_BUFFER> oled;
 
 void setup() {
